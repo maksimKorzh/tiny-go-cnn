@@ -1,155 +1,222 @@
 import sys
-import os
+import copy
 import numpy as np
 import torch
-from sgfmill import boards
 from model import *
 
+NONE = -1
+EMPTY = 0
+BLACK = 1
+WHITE = 2
+FENCE = 3
+ESCAPE = 4
 BOARD_SIZE = 19
-LETTERS = 'ABCDEFGHJKLMNOPQRST'  # 19 letters, no I
 
-def encode_board_1d_to_tensor(board_1d):
-  board_2d = board_1d.reshape(BOARD_SIZE, BOARD_SIZE)
+width = 21 # 19x19 board
+board = [[]]
+side = NONE
+ko = [NONE, NONE]
+groups = []
+best_move = NONE
+
+def init_board():
+  global board, side, ko, groups
+  board = [[0 for _ in range(width)] for _ in range(width)]
+  for row in range(width):
+    for col in range(width):
+      if row == 0 or row == width-1 or col == 0 or col == width-1:
+        board[row][col] = FENCE
+  side = BLACK
+  ko = [NONE, NONE]
+  groups = [[], []]
+
+def print_board():
+  for row in range(width):
+    for col in range(width):
+      if col == 0 and row != 0 and row != width-1:
+        rown = width-row-1
+        print((' ' if rown < 10 else ''), rown, end=' ')
+      if board[row][col] == FENCE: continue
+      if col == ko[0] and row == ko[1]: print('#', end=' ')
+      else: print(['.', 'X', 'O', '#'][board[row][col]], end=' ')
+    if row < width-1: print()
+  print('   ', 'A B C D E F G H J K L M N O P Q R S T'[:width*2-4])
+  print('\n    Side to move:', ('BLACK' if side == 1 else 'WHITE'), file=sys.stderr)
+  print()
+
+def print_groups():
+  print('    Black groups:')
+  for group in groups[BLACK-1]: print('      ', group)
+  print('\n    White groups:')
+  for group in groups[WHITE-1]: print('      ', group)
+  print()
+
+def count(col, row, color, marks):
+  stone = board[row][col]
+  if stone == FENCE: return
+  if stone and (stone & color) and marks[row][col] == EMPTY:
+    marks[row][col] = stone
+    count(col+1, row, color, marks)
+    count(col-1, row, color, marks)
+    count(col, row+1, color, marks)
+    count(col, row-1, color, marks)
+  elif stone == EMPTY:
+    marks[row][col] = ESCAPE
+
+def add_stones(marks, color):
+  group = {'stones': [], 'liberties' :[]}
+  for row in range(width):
+    for col in range(width):
+      stone = marks[row][col]
+      if stone == FENCE or stone == EMPTY: continue
+      if stone == ESCAPE: group['liberties'].append((col, row))
+      else: group['stones'].append((col, row))
+  return group
+
+def make_group(col, row, color):
+  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  count(col, row, color, marks)
+  return add_stones(marks, color)
+
+def update_groups():
+  global groups
+  groups = [[], []]
+  for row in range(width):
+    for col in range(width):
+      stone = board[row][col]
+      if stone == FENCE or stone == EMPTY: continue
+      if stone == BLACK:
+        group = make_group(col, row, BLACK)
+        if group not in groups[BLACK-1]: groups[BLACK-1].append(group)
+      if stone == WHITE:
+        group = make_group(col, row, WHITE)
+        if group not in groups[WHITE-1]: groups[WHITE-1].append(group)
+
+def is_clover(col, row):
+  clover_color = -1
+  other_color = -1
+  for stone in [board[row][col+1], board[row][col-1], board[row+1][col], board[row-1][col]]:
+    if stone == FENCE: continue
+    if stone == EMPTY: return EMPTY
+    if clover_color == -1:
+      clover_color = stone
+      other_color = (3-clover_color)
+    elif stone == other_color: return EMPTY
+  return clover_color
+
+def is_suicide(col, row, color):
+  suicide = False
+  board[row][col] = color
+  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  count(col, row, color, marks)
+  group = add_stones(marks, color)
+  if len(group['liberties']) == 0: suicide = True
+  board[row][col] = EMPTY
+  return suicide
+
+def is_atari(col, row, color):
+  atari = False
+  board[row][col] = color
+  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  count(col, row, color, marks)
+  group = add_stones(marks, color)
+  if len(group['liberties']) == 1: atari = True
+  board[row][col] = EMPTY
+  return atari
+
+def play(col, row, color):
+  global ko, side
+  ko = [NONE, NONE]
+  board[row][col] = color
+  update_groups()
+  for group in groups[(3-color-1)]:
+    if len(group['liberties']) == 0:
+      if len(group['stones']) == 1 and is_clover(col, row) == (3-color):
+        ko = group['stones'][0]
+      for stone in group['stones']:
+        board[stone[1]][stone[0]] = EMPTY
+  side = (3-color)
+
+def move_to_string(move):
+  global width
+  col = chr(move[0]-(1 if move[0]<=8 else 0)+ord('A'))
+  row = str(width-move[1]-1)
+  return col+row
+
+def encode_tensor(pos):
+  board_2d = pos.reshape(BOARD_SIZE, BOARD_SIZE)
   black_plane = (board_2d == 1).astype(np.float32)
   white_plane = (board_2d == 2).astype(np.float32)
   state = np.stack([black_plane, white_plane])
   tensor = torch.tensor(state).unsqueeze(0)  # batch dim
   return tensor
 
-def predict_best_move(model, board_1d):
+def encode_position():
+  arr = np.zeros(BOARD_SIZE * BOARD_SIZE, dtype=np.int8)
+  for r in range(1, BOARD_SIZE+1):
+    for c in range(1, BOARD_SIZE+1):
+      stone = board[r][c]
+      idx = (r-1) * BOARD_SIZE + (c-1)
+      if stone == BLACK: arr[idx] = 1
+      elif stone == WHITE: arr[idx] = 2
+  
+  #for r in range(19):
+  #  for c in range(19):
+  #    print(arr[r*19+c], end = ' ')
+  #  print()
+  return arr
+
+def genmove(color):
+  pos = encode_position()
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model.to(device)
   model.eval()
+
   with torch.no_grad():
-    input_tensor = encode_board_1d_to_tensor(board_1d).to(device)
+    input_tensor = encode_tensor(pos).to(device)
     output = model(input_tensor)
-    probs = torch.softmax(output, dim=1)
-    best_move_idx = torch.argmax(probs, dim=1).item()
-  return best_move_idx
+    probs = torch.softmax(output, dim=1).cpu().numpy()[0]
 
-class GtpEngine:
-  def __init__(self, model_path):
-    self.board = boards.Board(BOARD_SIZE)
-    self.model = TinyGoCNN()
-    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-    self.model.load_state_dict(checkpoint['model_state_dict'])
-    self.model.eval()
-    self.pass_count = 0
+  move_indices = probs.argsort()[::-1]
+  for i, best_move_idx in enumerate(move_indices):
+    row, col = divmod(best_move_idx, BOARD_SIZE)
+    if board[row+1][col+1] == EMPTY and (col+1, row+1) != ko and not is_suicide(col+1, row+1, color):
+      play(col+1, row+1, color)
+      return 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
+    if i > 5: return 'pass'
+  return 'pass'
 
-  def board_to_1d(self):
-    arr = np.zeros(BOARD_SIZE * BOARD_SIZE, dtype=np.int8)
-    for r in range(BOARD_SIZE):
-      for c in range(BOARD_SIZE):
-        stone = self.board.get(r, c)
-        idx = r * BOARD_SIZE + c
-        if stone == 'b': arr[idx] = 1
-        elif stone == 'w': arr[idx] = 2
-    return arr
+init_board();
+model = TinyGoCNN()
+checkpoint = torch.load("tiny-go-cnn.pth", map_location="cpu")
+model.load_state_dict(checkpoint['model_state_dict'])
 
-  def genmove(self, color):
-    board_1d = self.board_to_1d()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    self.model.to(device)
-    self.model.eval()
-
-    with torch.no_grad():
-      input_tensor = encode_board_1d_to_tensor(board_1d).to(device)
-      output = self.model(input_tensor)
-      probs = torch.softmax(output, dim=1).cpu().numpy()[0]
-
-    move_indices = probs.argsort()[::-1]
-    for best_move_idx in move_indices:
-      row, col = divmod(best_move_idx, BOARD_SIZE)
-      try:
-        result = self.board.play(row, col, color)
-        if result is not False:
-          self.pass_count = 0
-          return coords_to_gtp(row, col)
-      except ValueError:
-        self.pass_count += 1
-        print('PASS', file=sys.stderr)
-        return 'pass'
-        # Alternatively consider another move but this often results in illegal move
-        #continue
-
-    self.pass_count += 1
-    return 'pass'
-
-  def play(self, color, move):
-    if move.lower() == 'pass':
-      self.pass_count += 1
-      return True
-    self.pass_count = 0
-    try: row, col = gtp_to_coords(move)
-    except Exception: return False
-    result = self.board.play(row, col, color)
-    return result is not False
-
-  def is_game_over(self):
-      return self.pass_count >= 2
-
-def coords_to_gtp(row, col):
-  return LETTERS[col] + str(BOARD_SIZE - row)
-
-def gtp_to_coords(move):
-  col_letter = move[0].upper()
-  if col_letter not in LETTERS:
-    print(f"ERROR: {col_letter}", file=sys.stderr)
-    raise ValueError(f"Invalid column letter: {col_letter}")
-  col = LETTERS.index(col_letter)
-  row_num = int(move[1:])
-  row = BOARD_SIZE - row_num
-  if row < 0 or row >= BOARD_SIZE:
-    print(f"ERROR: {row_num}", file=sys.stderr)
-    raise ValueError(f"Invalid row number: {row_num}")
-  return row, col
-
-def showboard(board):
-  print('=')
-  print('  ' + ' '.join(LETTERS))
-  for r in range(BOARD_SIZE):
-    row_str = []
-    for c in range(BOARD_SIZE):
-      stone = board.get(r, c)
-      if stone == 'b': row_str.append('X')
-      elif stone == 'w': row_str.append('O')
-      else: row_str.append('.')
-    print(f"{BOARD_SIZE - r:2d} " + ' '.join(row_str))
-  print()
-
-model_path = 'tiny-go-cnn.pth'
-if not os.path.exists(model_path):
-  print(f"Error: checkpoint '{model_path}' not found.", file=sys.stderr)
-  sys.exit(1)
-
-engine = GtpEngine(model_path)
-for line in sys.stdin:
-  line = line.strip()
-  if line == '': continue
-  parts = line.split()
-  cmd = parts[0].lower()
-  if cmd == 'quit': print('='); break
-  elif cmd == 'name': print('= tiny go CNN\n')
-  elif cmd == 'version': print('= 1.0\n')
-  elif cmd == 'protocol_version': print('= 2\n')
-  elif cmd == 'boardsize':
-    if len(parts) < 2 or int(parts[1]) != BOARD_SIZE: print('? unacceptable size')
-    else: print('=\n')
-  elif cmd == 'clear_board':
-    engine.board = boards.Board(BOARD_SIZE)
-    engine.pass_count = 0
-    print('=\n')
-  elif cmd == 'play':
-    if len(parts) < 3: print('? syntax error'); continue
-    color = parts[1].lower()
-    move = parts[2]
-    if engine.play(color, move): print('=\n')
-    else: print('? illegal move')
-  elif cmd == 'genmove':
+while True:
+  command = input()
+  if 'name' in command: print('= Tiny Go CNN\n')
+  elif 'protocol_version' in command: print('= 2\n');
+  elif 'version' in command: print('=', 'by Code Monkey King\n')
+  elif 'list_commands' in command: print('= protocol_version\n')
+  elif 'boardsize' in command: width = int(command.split()[1])+2; print('=\n')
+  elif 'clear_board' in command: init_board(); print('=\n')
+  elif 'showboard' in command: print('= ', end=''); print_board()
+  elif 'play' in command:
+    if 'pass'.upper() not in command:
+      params = command.split()
+      color = BLACK if params[1] == 'B' else WHITE
+      col = ord(params[2][0])-ord('A')+(1 if ord(params[2][0]) <= ord('H') else 0)
+      row = width-int(params[2][1:])-1
+      play(col, row, color)
+      print('=\n')
+    else:
+      side = (3-side)
+      ko = [NONE, NONE]
+      print('=\n')
+  elif 'genmove' in command:
+    parts = command.split()
     if len(parts) < 2: print('? syntax error'); continue
-    color = parts[1].lower()
-    move = engine.genmove(color)
+    color = BLACK if parts[1].lower() == 'b' else WHITE
+    move = genmove(color)
     print(f"= {move}\n")
-  elif cmd == 'showboard': print('= '); showboard(engine.board); print('\n')
+  elif 'quit' in command: sys.exit()
   else: print('=\n')
-  sys.stdout.flush()

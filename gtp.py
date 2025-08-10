@@ -149,6 +149,7 @@ def encode_tensor(pos):
   white_plane = (board_2d == 2).astype(np.float32)
   state = np.stack([black_plane, white_plane])
   tensor = torch.tensor(state).unsqueeze(0)  # batch dim
+  print(tensor.shape)
   return tensor
 
 def encode_position():
@@ -159,11 +160,6 @@ def encode_position():
       idx = (r-1) * BOARD_SIZE + (c-1)
       if stone == BLACK: arr[idx] = 1
       elif stone == WHITE: arr[idx] = 2
-  
-  #for r in range(19):
-  #  for c in range(19):
-  #    print(arr[r*19+c], end = ' ')
-  #  print()
   return arr
 
 def genmove(color):

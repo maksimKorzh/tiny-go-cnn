@@ -11,15 +11,17 @@ batch_size = 128
 learning_rate = 0.001
 dataset_path = 'games.pt'
 checkpoint_path = 'tiny-go-cnn.pth'
+checkpoint_interval = 100_000  # save every N samples
 device = torch.device('cpu')
 
-model = Detlef44()  # Or TinyGoCNN()
+model = CMKGoCNN()  # Or TinyGoCNN()
 model.to(device)
 
 optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
 criterion = nn.CrossEntropyLoss()
 
 start_epoch = 0
+samples_since_last_ckpt = 0
 
 # Load dataset
 states, moves = torch.load(dataset_path)
@@ -34,7 +36,9 @@ try:
   model.load_state_dict(checkpoint['model_state_dict'])
   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
   start_epoch = checkpoint['epoch']
-  print(f"Checkpoint loaded, resuming from epoch {start_epoch}")
+  samples_since_last_ckpt = checkpoint.get('samples_since_last_ckpt', 0)
+  print(f"Checkpoint loaded, resuming from epoch {start_epoch}, "
+        f"{samples_since_last_ckpt} samples since last checkpoint.")
 except FileNotFoundError:
   print("No checkpoint found, starting training from scratch.")
 
@@ -55,17 +59,31 @@ for epoch in range(start_epoch, epochs):
     optimizer.step()
 
     epoch_loss += loss.item()
-    info = f'Epoch {epoch+1}/{epochs}, Iter {i}/{dataset_size}, loss {loss.item():.4f}'
-    with open('log.txt', 'a') as f: f.write(info + '\n')
-    print(info)
+    samples_since_last_ckpt += batch_states.size(0)
+    print(f'Epoch {epoch}/{epochs}, Iter {i}/{dataset_size}, loss {loss.item():.4f}')
+
+    # Save checkpoint every N samples
+    if samples_since_last_ckpt >= checkpoint_interval:
+      torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': epoch_loss / ((i + batch_size) / batch_size),
+        'samples_since_last_ckpt': 0
+      }, checkpoint_path)
+      print(f"Checkpoint saved after {samples_since_last_ckpt} samples.")
+      samples_since_last_ckpt = 0
 
   avg_loss = epoch_loss / (dataset_size / batch_size)
   print(f'Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}')
 
+  # Save final checkpoint for the epoch
   torch.save({
     'epoch': epoch + 1,
     'model_state_dict': model.state_dict(),
     'optimizer_state_dict': optimizer.state_dict(),
     'loss': avg_loss,
+    'samples_since_last_ckpt': samples_since_last_ckpt
   }, checkpoint_path)
   print(f"Checkpoint saved to {checkpoint_path}")
+

@@ -55,7 +55,9 @@ for epoch in range(start_epoch, epochs):
     optimizer.step()
 
     epoch_loss += loss.item()
-    print(f'Iter {i}/{dataset_size}, loss {loss.item():.4f}')
+    info = f'Epoch {epoch+1}/{epochs}, Iter {i}/{dataset_size}, loss {loss.item():.4f}'
+    with open('log.txt', 'a') as f: f.write(info + '\n')
+    print(info)
 
   avg_loss = epoch_loss / (dataset_size / batch_size)
   print(f'Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}')

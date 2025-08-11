@@ -2,7 +2,9 @@
 Bare minimum neural net to play plausible game of  Go
 
 # Setup & Results
+    Net:       7-layer CNN + fully connected output layer
     Games:     5000 pro games in SGF format
+    Samples:   1 038 110 training positions
     Input:     2 channels (black & white stones, 19x19 each)
     Output:    score for every possible move on the 19×19 board
     Epoch:     10

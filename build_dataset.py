@@ -8,7 +8,7 @@ base_dir = 'games'
 out_file = 'games.pt'
 start_year = 2000
 end_year = 2017
-max_games = 5000
+max_games = 5000 # 5000 for TinyGoCNN, 25000 for Detlef44
 
 def board_to_tensor(board):
   black_plane = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=np.float32)

@@ -149,7 +149,6 @@ def encode_tensor(pos):
   white_plane = (board_2d == 2).astype(np.float32)
   state = np.stack([black_plane, white_plane])
   tensor = torch.tensor(state).unsqueeze(0)  # batch dim
-  print(tensor.shape)
   return tensor
 
 def encode_position():

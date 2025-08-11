@@ -11,7 +11,7 @@ batch_size = 128
 learning_rate = 0.001
 dataset_path = 'games.pt'
 checkpoint_path = 'tiny-go-cnn.pth'
-checkpoint_interval = 100_000  # save every N samples
+checkpoint_interval = 100000  # save every N samples
 device = torch.device('cpu')
 
 model = CMKGoCNN()  # Or TinyGoCNN()
@@ -47,7 +47,7 @@ model.train()
 for epoch in range(start_epoch, epochs):
   permutation = torch.randperm(dataset_size)
   epoch_loss = 0
-  for i in range(0, dataset_size, batch_size):
+  for i in range(samples_since_last_ckpt, dataset_size, batch_size):
     indices = permutation[i:i+batch_size]
     batch_states = states[indices].to(device)
     batch_moves = moves[indices].to(device)
@@ -69,9 +69,9 @@ for epoch in range(start_epoch, epochs):
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': epoch_loss / ((i + batch_size) / batch_size),
-        'samples_since_last_ckpt': 0
+        'samples_since_last_ckpt': i
       }, checkpoint_path)
-      print(f"Checkpoint saved after {samples_since_last_ckpt} samples.")
+      print(f"Checkpoint saved after {i} samples.")
       samples_since_last_ckpt = 0
 
   avg_loss = epoch_loss / (dataset_size / batch_size)

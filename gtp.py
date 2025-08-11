@@ -182,7 +182,7 @@ def genmove(color):
   return 'pass'
 
 init_board();
-model = TinyGoCNN()
+model = CMKGoCNN() # TinyGoCNN()
 checkpoint = torch.load("tiny-go-cnn.pth", map_location="cpu")
 model.load_state_dict(checkpoint['model_state_dict'])
 

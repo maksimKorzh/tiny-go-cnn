@@ -19,10 +19,9 @@ from copy import deepcopy
 #
 ###################################
 
-#TOP_MOVES = 18  # explore this many
-#MAX_MOVES = 5   # during playout
-#PLAYOUTS = 20
-#KOMI = 7.5
+SEARCH_DEPTH = 4
+ROOT_MOVES = 20
+SEARCH_MOVES = 3
 
 ###################################
 #
@@ -210,7 +209,7 @@ def policy(quick_pass):
     else: return []
   else: return legal_moves
 
-def evaluate(color):
+def evaluate():
   black = 0
   white = 0
   for r in board:
@@ -218,24 +217,23 @@ def evaluate(color):
       if c == BLACK: black += 1
       elif c == WHITE: white += 1
   score = black - white
-  return score if color == BLACK else -score
+  return score if side == BLACK else -score
 
 def negamax(depth, alpha, beta):
   global board, groups, side, ko, best_move
   if depth == 0:
     score = evaluate()
     return score
-  moves = policy(False)[:3]
-  #print_board()
+  moves = policy(True)[:SEARCH_MOVES]
   if len(moves):
-    for move in genmove(side):
+    for move in moves:
       row, col = divmod(move, BOARD_SIZE)
       old_board = deepcopy(board)
       old_groups = deepcopy(groups)
       old_side = side
       old_ko = ko
       if move != NONE: play(col+1, row+1, side)
-      score = 0 #-negamax(depth-1, -beta, -alpha)
+      score = -negamax(depth-1, -beta, -alpha)
       board = old_board
       groups = old_groups
       side = old_side
@@ -251,8 +249,7 @@ def root(depth, color):
   global board, groups, side, ko, best_move
   best_score = -10000
   temp_best = NONE
-  moves = policy(False)[:5]
-  print('root called', moves, file=sys.stderr)
+  moves = policy(False)[:ROOT_MOVES]
   for move in moves:
     row, col = divmod(move, BOARD_SIZE)
     old_board = deepcopy(board)
@@ -262,7 +259,7 @@ def root(depth, color):
     if move != NONE: play(col+1, row+1, side)
     score = -negamax(depth-1, -10000, 10000)
     move_string = 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
-    print('>', move_string, move, -score if side == BLACK else score, file=sys.stderr)
+    print('>', move_string, -score if side == BLACK else score, file=sys.stderr)
     board = old_board
     groups = old_groups
     side = old_side
@@ -274,7 +271,7 @@ def root(depth, color):
   return best_score
 
 def genmove(color):
-  best_score = root(5, color)
+  best_score = root(SEARCH_DEPTH, color)
   if best_move != NONE:
     row, col = divmod(best_move, BOARD_SIZE)
     play(col+1, row+1, color)

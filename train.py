@@ -77,7 +77,9 @@ for epoch in range(start_epoch, epochs):
       samples_since_last_ckpt = 0
 
   avg_loss = epoch_loss / (dataset_size / batch_size)
-  print(f'Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}')
+  info = f'Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}'
+  with open('log.txt', 'a') as f: f.write(info + '\n')
+  print(info)
 
   # Save final checkpoint for the epoch
   torch.save({

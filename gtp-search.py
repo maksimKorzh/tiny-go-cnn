@@ -225,7 +225,8 @@ def negamax(depth, alpha, beta):
   if depth == 0:
     score = evaluate()
     return score
-  moves = policy(True)[:3]
+  moves = policy(False)[:3]
+  #print_board()
   if len(moves):
     for move in genmove(side):
       row, col = divmod(move, BOARD_SIZE)
@@ -234,7 +235,7 @@ def negamax(depth, alpha, beta):
       old_side = side
       old_ko = ko
       if move != NONE: play(col+1, row+1, side)
-      score = -negamax(depth-1, -beta, -alpha)
+      score = 0 #-negamax(depth-1, -beta, -alpha)
       board = old_board
       groups = old_groups
       side = old_side
@@ -251,16 +252,17 @@ def root(depth, color):
   best_score = -10000
   temp_best = NONE
   moves = policy(False)[:5]
+  print('root called', moves, file=sys.stderr)
   for move in moves:
-    print('root:', move, file=sys.stderr)
     row, col = divmod(move, BOARD_SIZE)
     old_board = deepcopy(board)
     old_groups = deepcopy(groups)
     old_side = side
     old_ko = ko
     if move != NONE: play(col+1, row+1, side)
-    score = 0 #-negamax(depth-1, -10000, 10000)
-    #print('>', move_to_string(move[0]), move, -score if side == BLACK else score, file=sys.stderr)
+    score = -negamax(depth-1, -10000, 10000)
+    move_string = 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
+    print('>', move_string, move, -score if side == BLACK else score, file=sys.stderr)
     board = old_board
     groups = old_groups
     side = old_side

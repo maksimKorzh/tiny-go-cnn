@@ -237,34 +237,14 @@ def select_puct(node):
 
 # --- Evaluate final board (very simple) ---
 def evaluate():
-#    Basic evaluator: counts stone difference (black - white) + komi for white.
-#    Returns +1 if black wins overall, -1 if white wins.
-#    You can replace this with a better scorer (territory, area, seki handling).
-#    Assumes global 'board' encoding: 1 for black stones, -1 for white stones, 0 for empty.
-    # ====== MODIFY HERE if your board encoding differs ======
-    # Example expects `board` variable available globally.
     black = 0
     white = 0
-    try:
-        for r in board:
-            for v in r:
-                if v == 1:
-                    black += 1
-                elif v == -1:
-                    white += 1
-    except Exception:
-        # If your board is 1D list of length 361:
-        try:
-            for v in board:
-                if v == 1:
-                    black += 1
-                elif v == -1:
-                    white += 1
-        except Exception:
-            raise RuntimeError("evaluate(): cannot iterate board — adapt evaluate() to your board format")
-
-    # Score from black perspective:
+    for r in board:
+        for c in r:
+            if c == BLACK: black += 1
+            elif c == WHITE: white += 1
     score = black - (white + KOMI)  # apply komi to white
+    print(f'{black=}, {white=}, {score=}')
     return 1 if score > 0 else -1
 
 # --- Policy-guided rollout (uses policy() ranking) ---
@@ -276,7 +256,6 @@ def policy_rollout(max_moves=200):
 
     while passes < 2: #and moves_played < max_moves:
         pol = policy()  # legal moves only, sorted best first
-        print(pol)
         if not pol: move = PASS  # no moves means pass
         else: move = pol[0]  # pick best move from policy
         if move == PASS:
@@ -288,10 +267,10 @@ def policy_rollout(max_moves=200):
             row, col = divmod(move, BOARD_SIZE)
             play(col + 1, row + 1, side)
             print_board()
-            print(passes)
         moves_played += 1
+        print(passes)
 
-    return 1 #evaluate()
+    return evaluate()
 
 # --- Main MCTS search: snapshots board at start of each simulation (commented copy/restore) ---
 def mcts_root_search(color, playouts=PLAYOUTS):
@@ -382,7 +361,6 @@ def genmove(color):
     probs = torch.softmax(output, dim=1).cpu().numpy()[0]
 
   move_indices = probs.argsort()[::-1]
-  print(move_indices)
   for i, best_move_idx in enumerate(move_indices):
     row, col = divmod(best_move_idx, BOARD_SIZE)
     if board[row+1][col+1] == EMPTY and (col+1, row+1) != ko and not is_suicide(col+1, row+1, color):

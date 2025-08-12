@@ -20,7 +20,7 @@ from copy import deepcopy
 ###################################
 
 SEARCH_DEPTH = 4
-ROOT_MOVES = 20
+ROOT_MOVES = 30
 SEARCH_MOVES = 3
 
 ###################################
@@ -234,6 +234,7 @@ def negamax(depth, alpha, beta):
       old_ko = ko
       if move != NONE: play(col+1, row+1, side)
       score = -negamax(depth-1, -beta, -alpha)
+      if move == 10: print('score L19:', score, file=sys.stderr)
       board = old_board
       groups = old_groups
       side = old_side
@@ -259,7 +260,7 @@ def root(depth, color):
     if move != NONE: play(col+1, row+1, side)
     score = -negamax(depth-1, -10000, 10000)
     move_string = 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
-    print('>', move_string, -score if side == BLACK else score, file=sys.stderr)
+    print('>', move_string, move, -score if side == BLACK else score, file=sys.stderr)
     board = old_board
     groups = old_groups
     side = old_side

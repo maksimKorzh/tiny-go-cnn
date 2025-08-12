@@ -19,9 +19,9 @@ from copy import deepcopy
 #
 ###################################
 
-TOP_MOVES = 18  # explore this many
+TOP_MOVES = 30  # explore this many
 MAX_MOVES = 5   # during playout
-PLAYOUTS = 20
+PLAYOUTS = 31
 KOMI = 7.5
 
 ###################################

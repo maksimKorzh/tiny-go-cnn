@@ -19,6 +19,7 @@ from copy import deepcopy
 #
 ###################################
 
+TOP_MOVES = 2  # explore this many
 PLAYOUTS = 10
 KOMI = 7.5
 
@@ -249,13 +250,13 @@ def evaluate():
     for c in r:
       if c == BLACK: black += 1
       elif c == WHITE: white += 1
-  score = black - (white + KOMI)  # apply komi to white
+  score = black - (white + KOMI)
   result = 1 if score > 0 else -1
   return result if side == BLACK else -result
 
 def policy_rollout():
   global board, groups, side, ko
-  max_moves = 10
+  max_moves = 3 # kind of lookahead
   passes = 0
   moves_played = 0
   while passes < 2 and moves_played < max_moves:
@@ -277,7 +278,7 @@ def mcts_root_search(color, playouts=PLAYOUTS):
   global board, groups, side, ko
   root = Node(parent=None)
   pol = policy(False)
-  top_moves = pol[:5]
+  top_moves = pol[:TOP_MOVES]
   if PASS not in top_moves: top_moves.append(PASS)
   for playout in range(playouts):
     node = root
@@ -302,7 +303,7 @@ def mcts_root_search(color, playouts=PLAYOUTS):
       path.append(node)
 
     # Expansion
-    pol_leaf = policy(False)[:5]
+    pol_leaf = policy(False)[:TOP_MOVES]
     if PASS not in pol_leaf: pol_leaf.append(PASS)
     for mv in pol_leaf:
       if mv not in node.children:

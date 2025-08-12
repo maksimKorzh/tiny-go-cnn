@@ -195,9 +195,8 @@ def policy(rollout):
 
 # --- Simple node for tree ---
 class Node:
-    def __init__(self, prior=0.0, parent=None):
+    def __init__(self, parent=None):
         self.parent = parent
-        self.prior = prior
         self.children = {}      # move (int) -> Node
         self.visits = 0
         self.value_sum = 0.0
@@ -216,7 +215,7 @@ def select_puct(node):
     best_move = None
     best_child = None
     for move, child in node.children.items():
-        u = PUCT_C * child.prior * (math.sqrt(total_visits) / (1 + child.visits)) if total_visits > 0 else PUCT_C * child.prior
+        u = PUCT_C * (math.sqrt(total_visits) / (1 + child.visits)) if total_visits > 0 else PUCT_C
         score = (child.value) + u
         if score > best_score:
             best_score = score
@@ -267,16 +266,12 @@ def policy_rollout(max_moves):
 
 def mcts_root_search(color, playouts=PLAYOUTS):
     global board, groups, side, ko
-    root = Node(prior=1.0, parent=None)
+    root = Node(parent=None)
 
     # Initialize root children from policy ranking + add PASS move explicitly
     pol = policy(False)  # legal moves only, no PASS
     top_moves = pol[:5]
     if PASS not in top_moves: top_moves.append(PASS)
-    priors = {m: 1.0 / len(top_moves) for m in top_moves}
-
-    for move, p in priors.items():
-        root.children[move] = Node(prior=p, parent=root)
 
     for playout in range(playouts):
         node = root
@@ -305,10 +300,9 @@ def mcts_root_search(color, playouts=PLAYOUTS):
         pol_leaf = policy(False)[:5]
         if PASS not in pol_leaf:
             pol_leaf.append(PASS)
-        p_uniform = 1.0 / len(pol_leaf)
         for mv in pol_leaf:
             if mv not in node.children:
-                node.children[mv] = Node(prior=p_uniform, parent=node)
+                node.children[mv] = Node(parent=node)
 
         # Simulation
         value = policy_rollout(MAX_MOVES)
@@ -326,10 +320,10 @@ def mcts_root_search(color, playouts=PLAYOUTS):
         side = old_side
         ko = old_ko
 
-        print(f"\nMCTS stats after {playout} simulations:")
+        print(f'\nMCTS stats after {playout+1} simulations:', file=sys.stderr)
         for move, child in root.children.items():
             avg_value = child.value
-            print(f"Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}, Prior: {child.prior:.3f}")
+            print(f'Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
 
     # Choose best move from root - by highest visit count (common choice)
     if not root.children: return PASS  # no legal moves

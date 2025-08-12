@@ -19,10 +19,10 @@ from copy import deepcopy
 #
 ###################################
 
-TOP_MOVES = 18  # explore this many
-MAX_MOVES = 5   # during playout
-PLAYOUTS = 20
-KOMI = 7.5
+#TOP_MOVES = 18  # explore this many
+#MAX_MOVES = 5   # during playout
+#PLAYOUTS = 20
+#KOMI = 7.5
 
 ###################################
 #
@@ -30,7 +30,6 @@ KOMI = 7.5
 #
 ###################################
 
-PASS = -1
 NONE = -1
 EMPTY = 0
 BLACK = 1
@@ -188,7 +187,7 @@ def encode_position():
       elif stone == WHITE: arr[idx] = 2
   return arr
 
-def policy(rollout):
+def policy(quick_pass):
   color = side
   pos = encode_position()
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -206,43 +205,10 @@ def policy(rollout):
     row, col = divmod(best_move_idx, BOARD_SIZE)
     if board[row+1][col+1] == EMPTY and (col+1, row+1) != ko and not is_suicide(col+1, row+1, color):
       legal_moves.append(best_move_idx)
-  if rollout:
+  if quick_pass:
     if legal_moves[0] == move_indices[0]: return legal_moves
     else: return []
   else: return legal_moves
-
-###################################
-#
-#               MCTS
-#
-###################################
-
-class Node:
-  def __init__(self, parent=None):
-    self.parent = parent
-    self.children = {}      # move (int) -> Node
-    self.visits = 0
-    self.value_sum = 0.0
-
-  @property
-  def value(self):
-    if self.visits == 0: return 0.0
-    return self.value_sum / self.visits
-
-def select_puct(node):
-  total_visits = sum(child.visits for child in node.children.values())
-  best_score = -1e9
-  best_move = None
-  best_child = None
-  PUCT_C = 1.5
-  for move, child in node.children.items():
-    u = PUCT_C * (math.sqrt(total_visits) / (1 + child.visits)) if total_visits > 0 else PUCT_C
-    score = (child.value) + u
-    if score > best_score:
-      best_score = score
-      best_move = move
-      best_child = child
-  return best_move, best_child
 
 def evaluate(color):
   black = 0
@@ -254,91 +220,60 @@ def evaluate(color):
   score = black - white
   return score if color == BLACK else -score
 
-def policy_rollout(color):
-  global board, groups, side, ko
-  max_moves = MAX_MOVES
-  passes = 0
-  moves_played = 0
-  while passes < 2 and moves_played < max_moves:
-    pol = policy(True)
-    if not pol: move = PASS
-    else: move = random.choice(pol[:3])
-    if move == PASS:
-      passes += 1
-      side = (3-side)
-      ko = [NONE, NONE]
-    else:
-      passes = 0
+def negamax(depth, alpha, beta):
+  global board, groups, side, ko, best_move
+  if depth == 0:
+    score = evaluate()
+    return score
+  moves = policy(True)[:3]
+  if len(moves):
+    for move in genmove(side):
       row, col = divmod(move, BOARD_SIZE)
-      play(col + 1, row + 1, side)
-    moves_played += 1
-  return evaluate(color)
+      old_board = deepcopy(board)
+      old_groups = deepcopy(groups)
+      old_side = side
+      old_ko = ko
+      if move != NONE: play(col+1, row+1, side)
+      score = -negamax(depth-1, -beta, -alpha)
+      board = old_board
+      groups = old_groups
+      side = old_side
+      ko = old_ko
+      if score > alpha:
+        if score >= beta: break
+        alpha = score
+        best_move = move
+  best_move = NONE
+  return alpha
 
-def mcts_root_search(color, playouts=PLAYOUTS):
-  global board, groups, side, ko
-  root = Node(parent=None)
-  pol = policy(False)
-  top_moves = pol[:TOP_MOVES]
-  if PASS not in top_moves: top_moves.append(PASS)
-  for playout in range(playouts):
-    node = root
-    path = [node]
-    
-    # Preserve board and state
+def root(depth, color):
+  global board, groups, side, ko, best_move
+  best_score = -10000
+  temp_best = NONE
+  moves = policy(False)[:5]
+  for move in moves:
+    print('root:', move, file=sys.stderr)
+    row, col = divmod(move, BOARD_SIZE)
     old_board = deepcopy(board)
     old_groups = deepcopy(groups)
     old_side = side
     old_ko = ko
-
-    # Selection
-    while node.children:
-      move, child = select_puct(node)
-      if move == PASS:
-        side = 3 - side
-        ko = [NONE, NONE]
-      else:
-        row, col = divmod(move, BOARD_SIZE)
-        play(col + 1, row + 1, side)
-      node = child
-      path.append(node)
-
-    # Expansion
-    if not node.children:
-        pol_leaf = policy(False)[:TOP_MOVES]
-        if PASS not in pol_leaf: pol_leaf.append(PASS)
-        for mv in pol_leaf:
-            if mv not in node.children:
-                node.children[mv] = Node(parent=node)
-
-    # Simulation
-    value = policy_rollout(color)
-
-    v = value
-    root_player = color
-    for n in reversed(path):
-        n.visits += 1
-        n.value_sum += v
-
-    # Restore board and state
+    if move != NONE: play(col+1, row+1, side)
+    score = 0 #-negamax(depth-1, -10000, 10000)
+    #print('>', move_to_string(move[0]), move, -score if side == BLACK else score, file=sys.stderr)
     board = old_board
     groups = old_groups
     side = old_side
     ko = old_ko
-
-    print(f'\nMCTS stats after {playout+1} simulations:', file=sys.stderr)
-    for move, child in root.children.items():
-        avg_value = child.value
-        row, col = divmod(move, BOARD_SIZE)
-        move_string = ('ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)).replace('T20', 'PASS')
-        print(f'Move: {move_string}, Visits: {child.visits}, Score: {avg_value:.3f}', file=sys.stderr)
-
-  if not root.children: return PASS  # no legal moves
-  best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
-  return best_move
+    if score > best_score:
+      best_score = score
+      temp_best = move
+  best_move = temp_best
+  return best_score
 
 def genmove(color):
-  best_move = mcts_root_search(color)
-  if best_move != PASS:
+  best_score = root(5, color)
+  if best_move != NONE:
     row, col = divmod(best_move, BOARD_SIZE)
     play(col+1, row+1, color)
     return 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)

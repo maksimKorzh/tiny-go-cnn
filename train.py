@@ -60,7 +60,9 @@ for epoch in range(start_epoch, epochs):
 
     epoch_loss += loss.item()
     samples_since_last_ckpt += batch_states.size(0)
-    print(f'Epoch {epoch}/{epochs}, Iter {i}/{dataset_size}, loss {loss.item():.4f}')
+    info = f'Epoch {epoch}/{epochs}, Iter {i}/{dataset_size}, loss {loss.item():.4f}'
+    with open('log.txt', 'a') as f: f.write(info + '\n')
+    print(info)
 
     # Save checkpoint every N samples
     if samples_since_last_ckpt >= checkpoint_interval:

@@ -1,3 +1,9 @@
+###################################
+#
+#  MCTS wrapper for Go Neural Net
+#
+###################################
+
 import sys
 import copy
 import math
@@ -7,12 +13,22 @@ import numpy as np
 from model import *
 from copy import deepcopy
 
-PLAYOUTS = 2              # number of MCTS sims per move (tune)
-PUCT_C = 1.5              # exploration constant
-PASS = -1                 # integer representing a pass move in your encoding
-KOMI = 7.5                # komi applied to white; used in evaluate()
-MAX_MOVES = 10            # max number of moves during rollout
+###################################
+#
+#              CONFIG
+#
+###################################
 
+PLAYOUTS = 10
+KOMI = 7.5
+
+###################################
+#
+#              GOBAN
+#
+###################################
+
+PASS = -1
 NONE = -1
 EMPTY = 0
 BLACK = 1
@@ -20,8 +36,8 @@ WHITE = 2
 FENCE = 3
 ESCAPE = 4
 BOARD_SIZE = 19
+WIDTH = 21
 
-width = 21 # 19x19 board
 board = [[]]
 side = NONE
 ko = [NONE, NONE]
@@ -30,26 +46,26 @@ best_move = NONE
 
 def init_board():
   global board, side, ko, groups
-  board = [[0 for _ in range(width)] for _ in range(width)]
-  for row in range(width):
-    for col in range(width):
-      if row == 0 or row == width-1 or col == 0 or col == width-1:
+  board = [[0 for _ in range(WIDTH)] for _ in range(WIDTH)]
+  for row in range(WIDTH):
+    for col in range(WIDTH):
+      if row == 0 or row == WIDTH-1 or col == 0 or col == WIDTH-1:
         board[row][col] = FENCE
   side = BLACK
   ko = [NONE, NONE]
   groups = [[], []]
 
 def print_board():
-  for row in range(width):
-    for col in range(width):
-      if col == 0 and row != 0 and row != width-1:
-        rown = width-row-1
+  for row in range(WIDTH):
+    for col in range(WIDTH):
+      if col == 0 and row != 0 and row != WIDTH-1:
+        rown = WIDTH-row-1
         print((' ' if rown < 10 else ''), rown, end=' ')
       if board[row][col] == FENCE: continue
       if col == ko[0] and row == ko[1]: print('#', end=' ')
       else: print(['.', 'X', 'O', '#'][board[row][col]], end=' ')
-    if row < width-1: print()
-  print('   ', 'A B C D E F G H J K L M N O P Q R S T'[:width*2-4])
+    if row < WIDTH-1: print()
+  print('   ', 'A B C D E F G H J K L M N O P Q R S T'[:WIDTH*2-4])
   print('\n    Side to move:', ('BLACK' if side == 1 else 'WHITE'), file=sys.stderr)
   print()
 
@@ -74,8 +90,8 @@ def count(col, row, color, marks):
 
 def add_stones(marks, color):
   group = {'stones': [], 'liberties' :[]}
-  for row in range(width):
-    for col in range(width):
+  for row in range(WIDTH):
+    for col in range(WIDTH):
       stone = marks[row][col]
       if stone == FENCE or stone == EMPTY: continue
       if stone == ESCAPE: group['liberties'].append((col, row))
@@ -83,15 +99,15 @@ def add_stones(marks, color):
   return group
 
 def make_group(col, row, color):
-  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  marks = [[EMPTY for _ in range(WIDTH)] for _ in range(WIDTH)]
   count(col, row, color, marks)
   return add_stones(marks, color)
 
 def update_groups():
   global groups
   groups = [[], []]
-  for row in range(width):
-    for col in range(width):
+  for row in range(WIDTH):
+    for col in range(WIDTH):
       stone = board[row][col]
       if stone == FENCE or stone == EMPTY: continue
       if stone == BLACK:
@@ -116,7 +132,7 @@ def is_clover(col, row):
 def is_suicide(col, row, color):
   suicide = False
   board[row][col] = color
-  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  marks = [[EMPTY for _ in range(WIDTH)] for _ in range(WIDTH)]
   count(col, row, color, marks)
   group = add_stones(marks, color)
   if len(group['liberties']) == 0: suicide = True
@@ -126,7 +142,7 @@ def is_suicide(col, row, color):
 def is_atari(col, row, color):
   atari = False
   board[row][col] = color
-  marks = [[EMPTY for _ in range(width)] for _ in range(width)]
+  marks = [[EMPTY for _ in range(WIDTH)] for _ in range(WIDTH)]
   count(col, row, color, marks)
   group = add_stones(marks, color)
   if len(group['liberties']) == 1: atari = True
@@ -147,9 +163,9 @@ def play(col, row, color):
   side = (3-color)
 
 def move_to_string(move):
-  global width
+  global WIDTH
   col = chr(move[0]-(1 if move[0]<=8 else 0)+ord('A'))
-  row = str(width-move[1]-1)
+  row = str(WIDTH-move[1]-1)
   return col+row
 
 def encode_tensor(pos):
@@ -193,172 +209,148 @@ def policy(rollout):
     else: return []
   else: return legal_moves
 
-# --- Simple node for tree ---
+###################################
+#
+#               MCTS
+#
+###################################
+
 class Node:
-    def __init__(self, parent=None):
-        self.parent = parent
-        self.children = {}      # move (int) -> Node
-        self.visits = 0
-        self.value_sum = 0.0
+  def __init__(self, parent=None):
+    self.parent = parent
+    self.children = {}      # move (int) -> Node
+    self.visits = 0
+    self.value_sum = 0.0
 
-    @property
-    def value(self):
-        if self.visits == 0:
-            return 0.0
-        return self.value_sum / self.visits
+  @property
+  def value(self):
+    if self.visits == 0: return 0.0
+    return self.value_sum / self.visits
 
-# --- Selection: PUCT ---
 def select_puct(node):
-    """Return (move, child) chosen by PUCT score from node.children."""
-    total_visits = sum(child.visits for child in node.children.values())
-    best_score = -1e9
-    best_move = None
-    best_child = None
-    for move, child in node.children.items():
-        u = PUCT_C * (math.sqrt(total_visits) / (1 + child.visits)) if total_visits > 0 else PUCT_C
-        score = (child.value) + u
-        if score > best_score:
-            best_score = score
-            best_move = move
-            best_child = child
-    return best_move, best_child
+  total_visits = sum(child.visits for child in node.children.values())
+  best_score = -1e9
+  best_move = None
+  best_child = None
+  PUCT_C = 1.5
+  for move, child in node.children.items():
+    u = PUCT_C * (math.sqrt(total_visits) / (1 + child.visits)) if total_visits > 0 else PUCT_C
+    score = (child.value) + u
+    if score > best_score:
+      best_score = score
+      best_move = move
+      best_child = child
+  return best_move, best_child
 
-# --- Terminal detection: two consecutive passes during rollout ---
-# We'll track consecutive passes in rollout loop instead of global state.
-# But for expansion/selection, if your environment can detect pass terminal condition, adapt accordingly.
-
-# --- Evaluate final board (very simple) ---
 def evaluate():
-    black = 0
-    white = 0
-    for r in board:
-        for c in r:
-            if c == BLACK: black += 1
-            elif c == WHITE: white += 1
-    score = black - (white + KOMI)  # apply komi to white
-    result = 1 if score > 0 else -1
-    return result if side == BLACK else -result
+  black = 0
+  white = 0
+  for r in board:
+    for c in r:
+      if c == BLACK: black += 1
+      elif c == WHITE: white += 1
+  score = black - (white + KOMI)  # apply komi to white
+  result = 1 if score > 0 else -1
+  return result if side == BLACK else -result
 
-# --- Policy-guided rollout (uses policy() ranking) ---
-def policy_rollout(max_moves):
-    global board, groups, side, ko
-
-    passes = 0
-    moves_played = 0
-
-    while passes < 2 and moves_played < max_moves:
-        pol = policy(True)  # legal moves only, sorted best first
-        if not pol: move = PASS  # no moves means pass
-        else: move = pol[0]  # pick best move from policy
-        if move == PASS:
-            passes += 1
-            side = (3-side)
-            ko = [NONE, NONE]
-        else:
-            passes = 0
-            row, col = divmod(move, BOARD_SIZE)
-            play(col + 1, row + 1, side)
-            #print_board()
-        moves_played += 1
-
-    return evaluate()
-
+def policy_rollout():
+  global board, groups, side, ko
+  max_moves = 10
+  passes = 0
+  moves_played = 0
+  while passes < 2 and moves_played < max_moves:
+    pol = policy(True)
+    if not pol: move = PASS
+    else: move = pol[0]
+    if move == PASS:
+      passes += 1
+      side = (3-side)
+      ko = [NONE, NONE]
+    else:
+      passes = 0
+      row, col = divmod(move, BOARD_SIZE)
+      play(col + 1, row + 1, side)
+    moves_played += 1
+  return evaluate()
 
 def mcts_root_search(color, playouts=PLAYOUTS):
-    global board, groups, side, ko
-    root = Node(parent=None)
+  global board, groups, side, ko
+  root = Node(parent=None)
+  pol = policy(False)
+  top_moves = pol[:5]
+  if PASS not in top_moves: top_moves.append(PASS)
+  for playout in range(playouts):
+    node = root
+    path = [node]
+    
+    # Preserve board and state
+    old_board = deepcopy(board)
+    old_groups = deepcopy(groups)
+    old_side = side
+    old_ko = ko
 
-    # Initialize root children from policy ranking + add PASS move explicitly
-    pol = policy(False)  # legal moves only, no PASS
-    top_moves = pol[:5]
-    if PASS not in top_moves: top_moves.append(PASS)
+    # Selection
+    while node.children:
+      move, child = select_puct(node)
+      if move == PASS:
+        side = 3 - side
+        ko = [NONE, NONE]
+      else:
+        row, col = divmod(move, BOARD_SIZE)
+        play(col + 1, row + 1, side)
+      node = child
+      path.append(node)
 
-    for playout in range(playouts):
-        node = root
-        path = [node]
-        
-        old_board = deepcopy(board)
-        old_groups = deepcopy(groups)
-        old_side = side
-        old_ko = ko
+    # Expansion
+    pol_leaf = policy(False)[:5]
+    if PASS not in pol_leaf: pol_leaf.append(PASS)
+    for mv in pol_leaf:
+      if mv not in node.children:
+        node.children[mv] = Node(parent=node)
 
-        # Selection
-        while node.children:
-            move, child = select_puct(node)
-            if move == PASS:
-                # Handle pass move: switch side, no play on board
-                side = 3 - side
-                ko = [NONE, NONE]
-            else:
-                row, col = divmod(move, BOARD_SIZE)
-                play(col + 1, row + 1, side)
-                #print_board()
-            node = child
-            path.append(node)
+    # Simulation
+    value = policy_rollout()
 
-        # Expansion
-        pol_leaf = policy(False)[:5]
-        if PASS not in pol_leaf:
-            pol_leaf.append(PASS)
-        for mv in pol_leaf:
-            if mv not in node.children:
-                node.children[mv] = Node(parent=node)
+    # Backpropagation
+    v = value
+    for n in reversed(path):
+      n.visits += 1
+      n.value_sum += v
+      v = -v
 
-        # Simulation
-        value = policy_rollout(MAX_MOVES)
+    # Restore board and state
+    board = old_board
+    groups = old_groups
+    side = old_side
+    ko = old_ko
 
-        # Backpropagation
-        v = value
-        for n in reversed(path):
-            n.visits += 1
-            n.value_sum += v
-            v = -v
-
-        # Restore board and state
-        board = old_board
-        groups = old_groups
-        side = old_side
-        ko = old_ko
-
-        print(f'\nMCTS stats after {playout+1} simulations:', file=sys.stderr)
-        for move, child in root.children.items():
-            avg_value = child.value
-            print(f'Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
-
-    # Choose best move from root - by highest visit count (common choice)
-    if not root.children: return PASS  # no legal moves
-    best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
-    return best_move
-
-
+    print(f'\nMCTS stats after {playout+1} simulations:', file=sys.stderr)
+    for move, child in root.children.items():
+        avg_value = child.value
+        print(f'Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
+  # Choose best move from root - by highest visit count (common choice)
+  if not root.children: return PASS  # no legal moves
+  best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
+  return best_move
 
 def genmove(color):
-  pos = encode_position()
-  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model.to(device)
-  model.eval()
+  best_move = mcts_root_search(color)
+  if best_move != PASS:
+    row, col = divmod(best_move, BOARD_SIZE)
+    play(col+1, row+1, color)
+    return 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
+  else: return 'pass'
 
-  with torch.no_grad():
-    input_tensor = encode_tensor(pos).to(device)
-    output = model(input_tensor)
-    probs = torch.softmax(output, dim=1).cpu().numpy()[0]
-
-  move_indices = probs.argsort()[::-1]
-  for i, best_move_idx in enumerate(move_indices):
-    row, col = divmod(best_move_idx, BOARD_SIZE)
-    if board[row+1][col+1] == EMPTY and (col+1, row+1) != ko and not is_suicide(col+1, row+1, color):
-      play(col+1, row+1, color)
-      return 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
-    if i > 5: return 'pass'
-  return 'pass'
+###################################
+#
+#               GTP
+#
+###################################
 
 init_board();
 model = CMKGoCNN() # TinyGoCNN()
 checkpoint = torch.load("tiny-go-cnn.pth", map_location="cpu")
 model.load_state_dict(checkpoint['model_state_dict'])
-
-mv = mcts_root_search(BLACK, playouts=PLAYOUTS)
-print('best move:', mv)
 
 while True:
   command = input()
@@ -366,7 +358,7 @@ while True:
   elif 'protocol_version' in command: print('= 2\n');
   elif 'version' in command: print('=', 'by Code Monkey King\n')
   elif 'list_commands' in command: print('= protocol_version\n')
-  elif 'boardsize' in command: width = int(command.split()[1])+2; print('=\n')
+  elif 'boardsize' in command: WIDTH = int(command.split()[1])+2; print('=\n')
   elif 'clear_board' in command: init_board(); print('=\n')
   elif 'showboard' in command: print('= ', end=''); print_board()
   elif 'play' in command:
@@ -374,7 +366,7 @@ while True:
       params = command.split()
       color = BLACK if params[1] == 'B' else WHITE
       col = ord(params[2][0])-ord('A')+(1 if ord(params[2][0]) <= ord('H') else 0)
-      row = width-int(params[2][1:])-1
+      row = WIDTH-int(params[2][1:])-1
       play(col, row, color)
       print('=\n')
     else:

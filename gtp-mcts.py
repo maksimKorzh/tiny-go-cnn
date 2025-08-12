@@ -7,6 +7,12 @@ import numpy as np
 from model import *
 from copy import deepcopy
 
+PLAYOUTS = 2              # number of MCTS sims per move (tune)
+PUCT_C = 1.5              # exploration constant
+PASS = -1                 # integer representing a pass move in your encoding
+KOMI = 7.5                # komi applied to white; used in evaluate()
+MAX_MOVES = 10            # max number of moves during rollout
+
 NONE = -1
 EMPTY = 0
 BLACK = 1
@@ -164,7 +170,7 @@ def encode_position():
       elif stone == WHITE: arr[idx] = 2
   return arr
 
-def policy():
+def policy(rollout):
   color = side
   pos = encode_position()
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -182,23 +188,10 @@ def policy():
     row, col = divmod(best_move_idx, BOARD_SIZE)
     if board[row+1][col+1] == EMPTY and (col+1, row+1) != ko and not is_suicide(col+1, row+1, color):
       legal_moves.append(best_move_idx)
-  if legal_moves[0] == move_indices[0]: return legal_moves
-  else: return []
-
-#MCTS + Policy-Guided Rollouts for a global-board, non-OOP Go bot.
-#Assumes these functions/variables exist somewhere in gtp.py:
-#    - policy() -> list_of_moves_sorted_best_to_worst
-#    - legal_moves() -> list_of_legal_moves (ints)
-#    - play(move) -> apply move to global board (and advance side)
-#    - side -> global current player: +1 (black) or -1 (white)
-#You MUST implement copy/restore of board state; placeholders are commented where to do that.
-
-
-# --- CONFIG ---
-PLAYOUTS = 1         # number of MCTS sims per move (tune)
-PUCT_C = 1.5              # exploration constant
-PASS = -1                 # integer representing a pass move in your encoding
-KOMI = 7.5                # komi applied to white; used in evaluate()
+  if rollout:
+    if legal_moves[0] == move_indices[0]: return legal_moves
+    else: return []
+  else: return legal_moves
 
 # --- Simple node for tree ---
 class Node:
@@ -244,18 +237,18 @@ def evaluate():
             if c == BLACK: black += 1
             elif c == WHITE: white += 1
     score = black - (white + KOMI)  # apply komi to white
-    print(f'{black=}, {white=}, {score=}')
-    return 1 if score > 0 else -1
+    result = 1 if score > 0 else -1
+    return result if side == BLACK else -result
 
 # --- Policy-guided rollout (uses policy() ranking) ---
-def policy_rollout(max_moves=200):
+def policy_rollout(max_moves):
     global board, groups, side, ko
 
     passes = 0
     moves_played = 0
 
-    while passes < 2: #and moves_played < max_moves:
-        pol = policy()  # legal moves only, sorted best first
+    while passes < 2 and moves_played < max_moves:
+        pol = policy(True)  # legal moves only, sorted best first
         if not pol: move = PASS  # no moves means pass
         else: move = pol[0]  # pick best move from policy
         if move == PASS:
@@ -266,26 +259,26 @@ def policy_rollout(max_moves=200):
             passes = 0
             row, col = divmod(move, BOARD_SIZE)
             play(col + 1, row + 1, side)
-            print_board()
+            #print_board()
         moves_played += 1
-        print(passes)
 
     return evaluate()
 
-# --- Main MCTS search: snapshots board at start of each simulation (commented copy/restore) ---
+
 def mcts_root_search(color, playouts=PLAYOUTS):
     global board, groups, side, ko
     root = Node(prior=1.0, parent=None)
 
-    # Initialize root children from policy ranking
-    pol = policy()  # already only legal moves, sorted best worst
-    top_moves = pol[:5]  # pick however many you want
-    priors = {m: 1.0 / len(top_moves) for m in top_moves}  # uniform or custom weighting
+    # Initialize root children from policy ranking + add PASS move explicitly
+    pol = policy(False)  # legal moves only, no PASS
+    top_moves = pol[:5]
+    if PASS not in top_moves: top_moves.append(PASS)
+    priors = {m: 1.0 / len(top_moves) for m in top_moves}
 
     for move, p in priors.items():
         root.children[move] = Node(prior=p, parent=root)
 
-    for sim in range(playouts):
+    for playout in range(playouts):
         node = root
         path = [node]
         
@@ -297,21 +290,28 @@ def mcts_root_search(color, playouts=PLAYOUTS):
         # Selection
         while node.children:
             move, child = select_puct(node)
-            row, col = divmod(move, BOARD_SIZE)
-            play(col+1, row+1, side)
-            print_board()
+            if move == PASS:
+                # Handle pass move: switch side, no play on board
+                side = 3 - side
+                ko = [NONE, NONE]
+            else:
+                row, col = divmod(move, BOARD_SIZE)
+                play(col + 1, row + 1, side)
+                #print_board()
             node = child
             path.append(node)
 
         # Expansion
-        pol_leaf = policy()[:5]  # top 5 legal moves only
+        pol_leaf = policy(False)[:5]
+        if PASS not in pol_leaf:
+            pol_leaf.append(PASS)
         p_uniform = 1.0 / len(pol_leaf)
         for mv in pol_leaf:
             if mv not in node.children:
                 node.children[mv] = Node(prior=p_uniform, parent=node)
 
         # Simulation
-        value = policy_rollout(max_moves=1000)
+        value = policy_rollout(MAX_MOVES)
 
         # Backpropagation
         v = value
@@ -320,32 +320,21 @@ def mcts_root_search(color, playouts=PLAYOUTS):
             n.value_sum += v
             v = -v
 
+        # Restore board and state
         board = old_board
         groups = old_groups
         side = old_side
         ko = old_ko
 
+        print(f"\nMCTS stats after {playout} simulations:")
+        for move, child in root.children.items():
+            avg_value = child.value
+            print(f"Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}, Prior: {child.prior:.3f}")
+
     # Choose best move from root - by highest visit count (common choice)
-    if not root.children:
-        return PASS  # no legal moves
+    if not root.children: return PASS  # no legal moves
     best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
     return best_move
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -19,8 +19,9 @@ from copy import deepcopy
 #
 ###################################
 
-TOP_MOVES = 2  # explore this many
-PLAYOUTS = 10
+TOP_MOVES = 20  # explore this many
+MAX_MOVES = 5   # during playout
+PLAYOUTS = 20
 KOMI = 7.5
 
 ###################################
@@ -61,14 +62,14 @@ def print_board():
     for col in range(WIDTH):
       if col == 0 and row != 0 and row != WIDTH-1:
         rown = WIDTH-row-1
-        print((' ' if rown < 10 else ''), rown, end=' ')
+        print((' ' if rown < 10 else ''), rown, end=' ', file=sys.stderr)
       if board[row][col] == FENCE: continue
-      if col == ko[0] and row == ko[1]: print('#', end=' ')
-      else: print(['.', 'X', 'O', '#'][board[row][col]], end=' ')
-    if row < WIDTH-1: print()
-  print('   ', 'A B C D E F G H J K L M N O P Q R S T'[:WIDTH*2-4])
+      if col == ko[0] and row == ko[1]: print('#', end=' ', file=sys.stderr)
+      else: print(['.', 'X', 'O', '#'][board[row][col]], end=' ', file=sys.stderr)
+    if row < WIDTH-1: print(file=sys.stderr)
+  print('   ', 'A B C D E F G H J K L M N O P Q R S T'[:WIDTH*2-4], file=sys.stderr)
   print('\n    Side to move:', ('BLACK' if side == 1 else 'WHITE'), file=sys.stderr)
-  print()
+  print(file=sys.stderr)
 
 def print_groups():
   print('    Black groups:')
@@ -243,26 +244,25 @@ def select_puct(node):
       best_child = child
   return best_move, best_child
 
-def evaluate():
+def evaluate(color):
   black = 0
   white = 0
   for r in board:
     for c in r:
       if c == BLACK: black += 1
       elif c == WHITE: white += 1
-  score = black - (white + KOMI)
-  result = 1 if score > 0 else -1
-  return result if side == BLACK else -result
+  score = black - white
+  return score if color == BLACK else -score
 
-def policy_rollout():
+def policy_rollout(color):
   global board, groups, side, ko
-  max_moves = 3 # kind of lookahead
+  max_moves = MAX_MOVES
   passes = 0
   moves_played = 0
   while passes < 2 and moves_played < max_moves:
     pol = policy(True)
     if not pol: move = PASS
-    else: move = pol[0]
+    else: move = random.choice(pol[:3])
     if move == PASS:
       passes += 1
       side = (3-side)
@@ -272,7 +272,7 @@ def policy_rollout():
       row, col = divmod(move, BOARD_SIZE)
       play(col + 1, row + 1, side)
     moves_played += 1
-  return evaluate()
+  return evaluate(color)
 
 def mcts_root_search(color, playouts=PLAYOUTS):
   global board, groups, side, ko
@@ -299,25 +299,28 @@ def mcts_root_search(color, playouts=PLAYOUTS):
       else:
         row, col = divmod(move, BOARD_SIZE)
         play(col + 1, row + 1, side)
+        #print(f'{move=}', file=sys.stderr)
+        #print_board()
       node = child
       path.append(node)
 
     # Expansion
-    pol_leaf = policy(False)[:TOP_MOVES]
-    if PASS not in pol_leaf: pol_leaf.append(PASS)
-    for mv in pol_leaf:
-      if mv not in node.children:
-        node.children[mv] = Node(parent=node)
+    if not node.children:
+        pol_leaf = policy(False)[:TOP_MOVES]
+        if PASS not in pol_leaf: pol_leaf.append(PASS)
+        for mv in pol_leaf:
+            if mv not in node.children:
+                node.children[mv] = Node(parent=node)
 
     # Simulation
-    value = policy_rollout()
+    value = policy_rollout(color)
+    print(f'ROOT PLAYER: {color}, {value=}', file=sys.stderr)
 
-    # Backpropagation
     v = value
+    root_player = color
     for n in reversed(path):
-      n.visits += 1
-      n.value_sum += v
-      v = -v
+        n.visits += 1
+        n.value_sum += v
 
     # Restore board and state
     board = old_board
@@ -329,11 +332,11 @@ def mcts_root_search(color, playouts=PLAYOUTS):
     for move, child in root.children.items():
         avg_value = child.value
         row, col = divmod(move, BOARD_SIZE)
-        move_string = 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
-        print(f'Move: {move_string}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
+        move_string = ('ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)).replace('T20', 'PASS')
+        print(f'Move: {move_string}, Visits: {child.visits}, Score: {avg_value:.3f}', file=sys.stderr)
 
   if not root.children: return PASS  # no legal moves
-  best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
+  best_move, best_child = max(root.children.items(), key=lambda it: it[1].value)
   return best_move
 
 def genmove(color):
@@ -363,7 +366,7 @@ while True:
   elif 'list_commands' in command: print('= protocol_version\n')
   elif 'boardsize' in command: WIDTH = int(command.split()[1])+2; print('=\n')
   elif 'clear_board' in command: init_board(); print('=\n')
-  elif 'showboard' in command: print('= ', end=''); print_board()
+  elif 'showboard' in command: print('= ', end=''); print_board(); print('\n')
   elif 'play' in command:
     if 'pass'.upper() not in command:
       params = command.split()

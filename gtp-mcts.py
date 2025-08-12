@@ -328,8 +328,10 @@ def mcts_root_search(color, playouts=PLAYOUTS):
     print(f'\nMCTS stats after {playout+1} simulations:', file=sys.stderr)
     for move, child in root.children.items():
         avg_value = child.value
-        print(f'Move: {move}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
-  # Choose best move from root - by highest visit count (common choice)
+        row, col = divmod(move, BOARD_SIZE)
+        move_string = 'ABCDEFGHJKLMNOPQRST'[col] + str(BOARD_SIZE - row)
+        print(f'Move: {move_string}, Visits: {child.visits}, Avg Value: {avg_value:.3f}', file=sys.stderr)
+
   if not root.children: return PASS  # no legal moves
   best_move, best_child = max(root.children.items(), key=lambda it: it[1].visits)
   return best_move

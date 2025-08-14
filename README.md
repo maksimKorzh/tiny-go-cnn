@@ -22,4 +22,4 @@ Bare minimum neural net to play plausible game of  Go
     Loss:      2.81
     CPU:       Intel© Core\u2122 i5-10400 CPU @ 2.90GHz × 6
     Time:     ~60hr, (~2.5 days)
-    Strength: ~10kyu (~5 kyu to ~14kyu, very imbalanced)
+    Strength: ~13 kyu

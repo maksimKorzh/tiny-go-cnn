@@ -1,7 +1,7 @@
 # Tiny Go CNN
 Bare minimum neural net to play plausible game of  Go
 
-# Setup & Results
+# Training results
     Net:       7-layer CNN + fully connected output layer
     Games:     5000 pro games in SGF format
     Samples:   1 038 110 training positions
@@ -13,6 +13,8 @@ Bare minimum neural net to play plausible game of  Go
     Time:     ~4hr
     Strength: ~17kyu
     
+    ------------------------------------------------------------    
+    
     Net:       11-layer CNN + fully connected output layer
     Games:     20000 pro games in SGF format
     Samples:   4 260 624 training positions
@@ -23,3 +25,11 @@ Bare minimum neural net to play plausible game of  Go
     CPU:       Intel© Core\u2122 i5-10400 CPU @ 2.90GHz × 6
     Time:     ~60hr, (~2.5 days)
     Strength: ~13 kyu
+
+# How to train/play?
+    git clone https://github.com/maksimKorzh/tiny-go-cnn
+    cd tiny-go-cnn
+    ./download.sh
+    python build_dataset.py
+    python train.py
+    python gtp.py # simple GTP implementation to work with GoGUI
